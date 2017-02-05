@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!DOCTYPE package-info SYSTEM "http://www.hippoedit.com/xml/package-info">
+<package-info xmlns="http://www.hippoedit.com/xml/package-info" xmlns:smf="http://www.hippoedit.com/">
+	<id>FAF9BB9E-8FFE-4920-A1FE-4C9BD9321F0E</id>
+	<name>Syntax Tools</name>
+	<version>1.2</version>
+	<description>The plug-in helps you in creating of HippoEDIT syntax specifications</description>
+	<author>HippoEDIT.com</author>
+	<email>supportbox@hippoedit.com</email>
+	<homepage>http://wiki.hippoedit.com/plugins/syntax-tools</homepage>
+	<memo></memo>
+	<install>
+		<readme type="inline">This will install Syntax Tools plug-in for HippoEDIT.</readme>
+		<require-file name="syntax_tools.hejs" destination="%{plugins}%/syntax_tools.hejs" />
+		<install-plugin path="%{plugins}%/syntax_tools.hejs"/>
+	</install>
+	<uninstall>
+		<readme type="inline">This will uninstall Syntax Tools plug-in for HippoEDIT.</readme>
+		<uninstall-plugin id="FAF9BB9E-8FFE-4920-A1FE-4C9BD9321F0E"/>
+		<remove-file name="%{plugins}%/syntax_tools.hejs" />
+	</uninstall>
+</package-info>

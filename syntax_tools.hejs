@@ -1,0 +1,763 @@
+#include "he_utils.js"
+#import "es5.js"
+
+Application.AddScriptInfo("FAF9BB9E-8FFE-4920-A1FE-4C9BD9321F0E", "Syntax Tools", "1.2", "The plug-in helps you in creating of HippoEDIT syntax specifications", "HippoEDIT.com", "supportbox@hippoedit.com", "http://wiki.hippoedit.com/plugin/syntax-tools");
+
+var uniq = function(ary) {
+	var prim = {
+		"boolean": {},
+		"number": {},
+		"string": {}
+	}, obj = [];
+
+	return ary.filter(function(x) {
+		var t = typeof x;
+		return (t in prim) ? !prim[t][x] && (prim[t][x] = 1) : obj.indexOf(x) < 0 && obj.push(x);
+	});
+};
+
+function parseINI(data){
+    var regex = {
+        section: /^\s*\[\s*([^\]]*)\s*\]\s*$/,
+        param: /^\s*([\w\.\-\_]+)\s*=\s*(.*?)\s*$/,
+        val: /^\s*(.+?)\s*$/,
+        comment: /^\s*;.*$/
+    };
+    var value = {};
+    var lines = data.split(/\r\n|\r|\n/);
+    var section = null;
+    lines.forEach(function(line){
+        if(regex.comment.test(line)){
+            return;
+        }else if(regex.param.test(line)){
+            var match = line.match(regex.param);
+            if(section){
+                value[section][match[1]] = match[2];
+            }else{
+                value[match[1]] = match[2];
+            }
+        }else if(regex.section.test(line)){
+            var match = line.match(regex.section);
+            value[match[1]] = {};
+            section = match[1];
+        }else if(line.length == 0 && section){
+            section = null;
+		}else if(regex.val.test(line)){
+            var match = line.match(regex.val);
+            if(section){
+                value[section][match[1]] = null;
+            }else{
+                value[match[1]] = null;
+            }
+        };
+    });
+    return value;
+}
+
+if (!String.prototype.encodeHTML) {
+	String.prototype.encodeHTML = function() {
+		return this.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/\n/g, '\\n')
+			.replace(/"/g, '&quot;');
+	};
+}
+
+function copyVal(text, name) {
+	var found = text.match(RegExp("\\s+" + name + "\\s*=\\s*([^\\s]+)"));
+	return found ? found[1] : null;
+}
+
+function copyRegexp(text, regexp) {
+	var found = text.match(regexp);
+	return found ? found[1] : null;
+}
+
+function dumpObjectXML(out, object) {
+	for (var prop in object) {
+		if (typeof(object[prop]) != 'object') out += " " + prop + "=\"" + String(object[prop]).encodeHTML() + "\"";
+	}
+	return out.ltrim();
+}
+
+function splitStrings(strings) {
+	if (strings) {
+		var a = strings.match(/"[^"]+"/g);
+		for (var i = 0; i < a.length; i++)
+		a[i] = a[i].replace(/^[\s"]+|[\s"]+$/g, '');
+		return a;
+	}
+
+	return null;
+}
+
+function generateHESyntax(syntax) {
+	var colors = ["Keyword", "Keyword2", "Keyword3", "Keyword4", "Keyword5", "Tag", "Tag2"];
+	if ( !syntax.id || GetSyntax(syntax.id))
+	{
+		if ( syntax.file_extensions && syntax.file_extensions.length ) {
+			var id = syntax.file_extensions[0].replace(/^[\*\.]+|;$/g, '');
+			if ( id && !Settings.GetSyntax(id) ) syntax.id = id;
+		}
+		if ( !syntax.id ) {
+			var id = syntax.name.replace(/[\s:\*\\\/\?\<\>\.]/g, '').toLowerCase();
+			if ( id && !Settings.GetSyntax(id) ) syntax.id = id;
+		}
+		if ( !syntax.id ) {
+			while ( true ) {
+				var id = prompt("Define syntax id", "").toLowerCase();
+				if ( !Settings.GetSyntax(id) ) {
+					syntax.id = id;
+					break;
+				} else {
+					alert("Syntax with same ID already exist!");
+				}					
+			}
+		}		
+	}
+	
+	// collect word characters from keywords
+	var wordInitChars = "";
+	var wordChars = "";
+	var standardChars = "_0123456789qwertzuiopasdfghjklyxcvbnmQWERTZUIOPASDFGHJKLYXCVBNM";
+	for (var style in syntax.styles) {
+		var oStyle = syntax.styles[style];
+		if (oStyle.keywords) {
+			for (var k = 0; k < oStyle.keywords.length; k++) {
+				for (var c = 0; c < oStyle.keywords[k].length; c++) {
+					var ch = oStyle.keywords[k][c];
+					if ( standardChars.indexOf(ch) === -1 ) {
+						if (c === 0 && wordInitChars.indexOf(ch) === -1)
+							wordInitChars += ch;
+						if (wordChars.indexOf(ch) === -1)
+							wordChars += ch;						
+					}
+				}
+			}
+		}
+	}
+	
+	if (wordInitChars !== ""){
+		if (!syntax.words_init || syntax.words_init == "") syntax.words_init = "A-Za-z_";
+		syntax.words_init += wordInitChars;
+	}
+	if (wordChars !== ""){
+		if (!syntax.words || syntax.words == "") syntax.words = "0-9A-Za-z_";
+		syntax.words += wordInitChars;
+	}
+
+	if ( !syntax.styles["Operators"] ) syntax.styles["Operators"] = { name : "Operators" };
+	syntax.styles["Operators"].id = "operator";
+	syntax.styles["Operators"].clr = "Operator";
+	syntax.styles["Operators"].extend = "true";
+	
+	if ( !syntax.styles["url"] ) syntax.styles["url"] = { id : "url" };	
+	syntax.styles["url"].extend = "true";
+	syntax.styles["url"].containers = { open : [] };
+	syntax.styles["url"].containers.open.push({ id : "normal", exclude : "true" });
+	if ( syntax.styles["Strings"] ) syntax.styles["url"].containers.open.push({ id : "string"});
+	if ( syntax.styles["Comments"] ) syntax.styles["url"].containers.open.push({ id : "comment"});
+	if ( syntax.styles["Char"] ) syntax.styles["url"].containers.open.push({ id : "char"});
+
+	if ( !syntax.styles["number"] ) syntax.styles["number"] = { id : "number", blocks: [] };	
+	syntax.styles["number"].extend = "true";
+	if ( syntax.styles["Preprocessor"] ) {
+		syntax.styles["number"].containers = { open : [] };
+		syntax.styles["number"].containers.open.push({ id : "preprocessor" });	
+	}
+	syntax.styles["number"].blocks.push({ open : syntax.hex_prefix?syntax.hex_prefix:"0x", noneof : "0-9A-Fa-fU"});
+
+	syntax.inherit = "def_source";
+	syntax.inherit_url = "defsource_spec.xml";
+	var spec = NewFile(ExpandTemplate("%UserDir%") + "\\data\\syntax\\" + syntax.id + "_spec.xml", "", "hippo");
+	spec.appendln('<?xml version="1.0" encoding="utf-8"?>');
+	spec.appendln('<?xml-stylesheet type="text/xsl" href="syntax.xslt"?>');
+	spec.appendln('<XMLConfigSettings>');
+	spec.appendln('  <FILEINFO author="' + ExpandTemplate("%USERNAME%") + '" type="LangSpec"/>');
+	spec.appendln('  <SYNTAX id="' + syntax.id + '" name="' + String(syntax.name).encodeHTML() + '" inherit="' + syntax.inherit + '" inherit_url="' + syntax.inherit_url + '">');
+	spec.appendln('    <SPECIFICATION>');
+	if (syntax.file_extensions && syntax.file_extensions.length) spec.appendln('      <FilePattern mask="' + syntax.file_extensions.join(";") + '"/>');
+	if (syntax.case_sensitive) spec.appendln('      <CaseSensitive>true</CaseSensitive>');
+	if (syntax.words) {
+		if ( !syntax.words_init || syntax.words_init == "") spec.appendln('      <Words>' + String(syntax.words).encodeHTML() + '</Words>');
+		else spec.appendln('      <Words init"' + String(syntax.words_init).encodeHTML() + '">' + String(syntax.words).encodeHTML() + '</Words>');
+	}
+	if (syntax.escape_char) spec.appendln('      <EscapeChar>' + String(syntax.escape_char).encodeHTML() + '</EscapeChar>');
+	
+	// we do not need to add symbol to delimiters, if it is already in operators or in open close symbols
+	if ( syntax.delimiters ) {
+		var delimiters = "";
+		for (i = 0; i < syntax.delimiters.length; i++) {
+			if ( syntax.operators && syntax.operators.indexOf(syntax.delimiters[i]) !== -1 )
+				continue;
+			if ( syntax.open_close && syntax.open_close.indexOf(syntax.delimiters[i]) !== -1 )
+				continue;
+			delimiters += syntax.delimiters[i];
+		}
+		syntax.delimiters = delimiters;	
+	}
+
+	if (syntax.delimiters) spec.appendln('      <Delimiters>' + String(syntax.delimiters).encodeHTML() + '</Delimiters>');
+	if (syntax.operators) spec.appendln('      <Operators>' + String(syntax.operators).encodeHTML() + '</Operators>');
+	if (syntax.open_close) spec.appendln('      <OpenClose>' + String(syntax.open_close).encodeHTML() + '</OpenClose>');
+	if ( syntax.tab_size && syntax.tab_size != "0") spec.appendln('      <Formatting tab_size="' + syntax.tab_size + '" />'); 
+	spec.appendln('    </SPECIFICATION>');
+	spec.appendln('    <SCOPES>');
+	if (syntax.scopes && syntax.scopes.length) {
+		for (var i = 0; i < syntax.scopes.length; i++) {
+			spec.appendln('      <Scope ' + dumpObjectXML("", syntax.scopes[i]) + '/>');
+		}
+	}
+	if (syntax.indent_folding) spec.appendln('      <IndentScope/>');
+	spec.appendln('    </SCOPES>');
+	spec.appendln('    <STYLES>');
+	var nColorCounter = 0;
+	for (var style in syntax.styles) {
+		if ((!syntax.styles[style].clr || syntax.styles[style].clr == "") && !syntax.styles[style].extend) syntax.styles[style].clr = colors[(nColorCounter++) % 7];
+		spec.appendln('      <Style ' + dumpObjectXML("", syntax.styles[style]) + '>');
+		if (syntax.styles[style].containers) {
+			spec.appendln('        <Containers>');
+			for (var i = 0; i < syntax.styles[style].containers.open.length; i++) {
+				spec.appendln('          <Open ' + dumpObjectXML("", syntax.styles[style].containers.open[i]) + '/>');
+			}
+			spec.appendln('        </Containers>');
+		}
+
+		if (syntax.styles[style].blocks || syntax.styles[style].regexp) {
+			spec.appendln('        <Blocks>');
+			if (syntax.styles[style].regexp) {
+				for (var i = 0; i < syntax.styles[style].regexp.length; i++) {
+					spec.appendln('          <Regexp ' + dumpObjectXML("", syntax.styles[style].regexp[i]) + '/>');
+				}
+			}
+			for (var i = 0; i < syntax.styles[style].blocks.length; i++) {
+				spec.appendln('          <Block ' + dumpObjectXML("", syntax.styles[style].blocks[i]) + '/>');
+			}
+			spec.appendln('        </Blocks>');
+		}
+		if (syntax.styles[style].keywords) {
+			spec.appendln('        <Keywords>');
+			for (var i = 0; i < syntax.styles[style].keywords.length; i++) {
+				spec.appendln('          <Keyword text="' + String(syntax.styles[style].keywords[i]).encodeHTML() + '"/>');
+			}
+			spec.appendln('        </Keywords>');
+		}
+		spec.appendln('      </Style>');
+	}
+	spec.appendln('    </STYLES>');
+	spec.appendln('  </SYNTAX>');
+	spec.appendln('</XMLConfigSettings>');
+}
+
+// http://www.ultraedit.com/forums/viewtopic.php?t=4124
+// http://www.ultraedit.com/help/article/syntax-highlighting-1538.html
+
+function importUESyntax(filename) {
+	var text = read_file(filename);	
+	//text = text.replace(/^[;#].*$/gm, ""); // remove commented lines
+	var syntax = {};
+	syntax.name           = text.match(/\/L\d+"([^"]+)"/)[1];
+	syntax.case_sensitive = text.match(/\s+Nocase\s+/) ? false : true;
+	var cscope         	  = text.match(/^\/Indent Strings\s*=\s*"\{"\s*\/Unindent Strings\s*=[ \t]*"\}"/m) ? true : false;
+	cscope         	   	  |= text.match(/^\/Open Fold Strings\s*=\s*"\{"\s*\/Close Fold Strings\s*=\s*"\}"/m) ? true : false;
+	if ( cscope ) {
+		syntax.scopes = [{ open : "{", close : "}" }]
+	}
+	syntax.escape_char    = copyVal(text, "Escape Char");
+	var string_prefix     = copyVal(text, "String Literal Prefix");
+	syntax.indent_folding = text.match(/\s+EnableCFByIndent\s+/) ? true : false;
+	var line_comment        = copyVal(text, "Line Comment");
+	var line_comment_lead   = copyVal(text, "Line Comment Preceding Chars");
+	var line_comment_num    = copyVal(text, "Line Comment Num");
+	var line_comment_column = copyVal(text, "Line Comment Valid Columns");
+	var line_comment_alt    = copyVal(text, "Line Comment Alt");
+	var block_comment       = { open: copyVal(text, "Block Comment On"), close: copyVal(text, "Block Comment Off") };
+	var block_comment_alt   = { open: copyVal(text, "Block Comment On Alt"), close: copyVal(text, "Block Comment Off Alt") };
+	var marker_chars        = copyRegexp(text, /^\/Marker\s+Characters\s*=[ \t]*(.+)$/m);
+	var string_chars        = copyVal(text, "String Chars");
+	if (!string_chars && !text.match(/\s+Noquote\s+/)) string_chars = "\"'";
+	var found = text.match(/\s+File Extensions\s*=[ \t]*(.+)$/m);
+	syntax.file_extensions = new Array();
+	if (found && found[1].trim().length) {
+		syntax.file_extensions = found[1].trim().split(/\s+/);
+		for (var i = 0; i < syntax.file_extensions.length; i++) {
+			syntax.file_extensions[i] = "*." + syntax.file_extensions[i].trim().toLowerCase();
+		}
+	}
+	found = text.match(/\s+File Names\s*=[ \t]*(.+)$/m);
+	if (found && found[1].trim().length) {
+		var file_names = found[1].split(/\s+/);
+		for (var i = 0; i < file_names.length; i++) {
+			file_names[i] = file_names[i].trim().toLowerCase();
+		}
+		syntax.file_extensions.push.apply(syntax.file_extensions, file_names);
+	}
+	syntax.file_extensions = uniq(syntax.file_extensions);
+
+	var line_preprocessor  = copyRegexp(text, /^\/Ignore Strings SOL\s*=[ \t]*"?([^"\s]+)"?$/m);
+	syntax.delimiters = copyRegexp(text, /^\/Delimiters\s*=[ \t]*(.+)$/m);
+	if ( string_chars && syntax.delimiters ) syntax.delimiters += string_chars;  
+	if (syntax.delimiters) syntax.delimiters = uniq(syntax.delimiters.replace(/\s+/g, '').split("")).join("");
+
+	var open_brace = splitStrings(copyRegexp(text, /^\/Open Brace Strings\s*=[ \t]*([^\/]+)/m));
+	var close_brace = splitStrings(copyRegexp(text, /^\/Close Brace Strings\s*=[ \t]*([^\/]+)/m));
+	if (open_brace && close_brace && open_brace.length == close_brace.length) {
+		syntax.open_close = "";
+		for (var i = 0; i < open_brace.length; i++) {
+			syntax.open_close += open_brace[i] + close_brace[i];
+		}
+	}
+
+	syntax.styles = {};
+
+	if (string_chars && string_chars.trim().length) {
+		syntax.styles["Strings"] = { id: "string", name: "Strings", text: 1, bold: 0, italic: 0, underline: 0, clr: "Strings", bkclr: "#FFFFFFFF" };
+		syntax.styles["Strings"].blocks = new Array();
+		var aStringChars = string_chars.split("");
+		for (var i = 0; i < aStringChars.length; i++) {
+			syntax.styles["Strings"].blocks.push({ open: aStringChars[i], close: aStringChars[i] });
+		}
+		if (string_prefix && syntax.escape_char) syntax.styles["Strings"].blocks.push({ open: string_prefix + aStringChars[i], close: aStringChars[i], escaping: "false" });
+	}
+
+	if (line_comment || line_comment_alt || line_comment_num || (block_comment.open && block_comment.close) || block_comment_alt.open) {
+		syntax.styles["Comments"] = { id: "comment", name: "Comments", text: 1, bold: 0, italic: 1, underline: 0, clr: "Comments", bkclr: "#FFFFFFFF" };
+		syntax.styles["Comments"].blocks = [];
+		if (line_comment) {
+			if ( line_comment_lead ) {
+				syntax.styles["Comments"].regexp = [];
+				var def = { open: line_comment, open_lead : line_comment_lead, close: "\\n" };
+				syntax.styles["Comments"].regexp.push(def);			
+			} else {
+				var def = { open: line_comment, close: "\\n" };
+				if (line_comment_column) {
+					var found = line_comment_column.match(/\s*\[(\d+)\]\s*/);
+					if (found) def.start_pos = parseInt(found[1]) - 1;
+				}
+				syntax.styles["Comments"].blocks.push(def);
+			}
+		}
+
+		if (line_comment_alt) syntax.styles["Comments"].blocks.push({ open: line_comment_alt, close: "\\n" });
+
+		if (block_comment.open && block_comment.close) syntax.styles["Comments"].blocks.push(block_comment);
+
+		if (line_comment_num) {
+			var found = line_comment_num.match(/(\d+)(.*)/);
+			if (found) {
+				syntax.styles["Comments"].blocks.push({ open: found[2], start_pos: parseInt(found[1]) - 1, close: "\\n" });
+			}
+		}
+		if (block_comment_alt.open && (block_comment_alt.close || block_comment.close)) {
+			var block_comment_alt_close = block_comment_alt.close;
+			if (!block_comment_alt_close) block_comment_alt_close = block_comment.close;
+			syntax.styles["Comments"].blocks.push({ open: block_comment_alt.open, close: block_comment_alt_close });
+		}
+	}
+	
+	if ( line_preprocessor ) {
+		syntax.styles["Preprocessor"] = { id: "preprocessor", name: "Preprocessor", text: 0, bold: 0, italic: 1, underline: 0, clr: "Preprocessor", bkclr: "#FFFFFFFF" };
+		syntax.styles["Preprocessor"].blocks = [];
+		syntax.styles["Preprocessor"].blocks.push({ open: line_preprocessor, close: "\\n", start_pos: "0" });		
+	}
+
+	if (marker_chars) {
+		marker_chars = marker_chars.replace(/^["\s]+|["\s]+$/g, '');
+		var markers = marker_chars.split("");
+		for (var i = 0; i < markers.length / 2; i++) {
+			var group = "Marker" + i;
+			syntax.styles[group] = { name: group};
+			syntax.styles[group].blocks = [{ open: markers[i*2], close: markers[i*2 + 1] }];
+		}
+	}
+
+	var operators = [];
+	var keywords = text.match(/^\/C\d{1,2}(?:"[^"]+")?(?:\s+\w+)?\s+(?:^(?:\/+|[^\/]+)$[\n\r]+)+/mg);
+	if (keywords) {
+		var group = 0;
+		for (var i = 0; i < keywords.length; i++) {
+			var found = keywords[i].match(/^\/C\d{1,2}(?:"([^"]*)")?(?:\s+(\w+))?\s+((?:^(?:\/+|[^\/]+)$[\n\r]+)+)/m);
+			var name  = found[1].trim();
+			var style = found[2].trim();
+ 			var lead_keywords = [];
+			var lead_keywords_match  = found[3].match(/^\*\*\s*.*$/mg);
+			if ( lead_keywords_match ) {
+				found[3] = found[3].replace(/^\*\*\s*.*$/mg, "");
+				for (var y = 0; y < lead_keywords_match.length; y++) {
+					var line = lead_keywords_match[y].replace(/^\*+\s+/g, '').split(/\s+/);
+					lead_keywords.push.apply(lead_keywords, line);  
+				}
+			}
+			var style_keywords = found[3].split(/\s+/);
+			if (name === "Operators" || style === "STYLE_OPERATOR") {
+				for (var y = 0; y < style_keywords.length;) {
+					var style_keyword = style_keywords[y].trim();
+					if (style_keyword.length == 1 || style_keyword === "//") {
+						operators.push(style_keyword[0]);
+						style_keywords.splice(y, 1);
+					} else {
+						style_keywords[y] = style_keyword.replace(/^\/\//, "/"); 
+						y++;
+					}
+				}
+			} else if (name === "Delimiters") {
+				if ( !syntax.delimiters ) syntax.delimiters = ""; 
+				for (var y = 0; y < style_keywords.length;) {
+					var style_keyword = style_keywords[y].trim();
+					if (style_keyword.length == 1 || style_keyword === "//") {
+						syntax.delimiters += style_keyword[0];
+						style_keywords.splice(y, 1);
+					} else {
+						style_keywords[y] = style_keyword.replace(/^\/\//, "/"); 
+						y++;
+					}
+				}
+				uniq(syntax.delimiters.replace(/\s+/g, '').split("")).join("");
+			} else {
+				for (var y = 0; y < style_keywords.length;) {
+					var style_keyword = style_keywords[y].trim();
+					if (style_keyword.length == 1 && syntax.delimiters && syntax.delimiters.indexOf(style_keyword) != -1) {
+						style_keywords.splice(y, 1);
+					} else {
+						style_keywords[y] = style_keyword.replace(/^\/\//, "/"); 
+						y++;
+					}
+				}
+			}
+			style_keywords = uniq(style_keywords);
+			lead_keywords  = uniq(lead_keywords); 
+			if (style_keywords.length || lead_keywords.length){
+				if (name == "") name = "Group " + (++group);
+				if (!syntax.styles[name]) syntax.styles[name] = { "name": name };
+				if ( name.match(/preprocessor/i) ){
+					syntax.styles[name].id = "preprocessor";
+					syntax.styles[name].clr = "Preprocessor";
+				} 
+				if ( style_keywords.length ) {
+					syntax.styles[name].keywords = style_keywords;
+				}				
+				if ( lead_keywords.length ) {
+					syntax.styles[name].blocks = [];
+					for (var y = 0; y < lead_keywords.length; y++)
+						syntax.styles[name].blocks.push({ open: lead_keywords[y].trim(), close: "" });				
+				}
+			}
+			switch (style) {
+				case "STYLE_KEYWORD" : 
+					syntax.styles[name].clr = "Keyword";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					syntax.styles[name].image = "13";
+					break;
+				case "STYLE_FUNCTION" : 
+					syntax.styles[name].clr = "Keyword3";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					syntax.styles[name].image = "9";
+					break;
+				case "STYLE_METHOD" : 
+					syntax.styles[name].clr = "Keyword2";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					syntax.styles[name].image = "10";
+					break;
+				case "STYLE_EVENT" : 
+					syntax.styles[name].clr = "Keyword2";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					syntax.styles[name].image = "20";
+					break;
+				case "STYLE_VARIABLE" : 
+					syntax.styles[name].clr = "Keyword4";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					syntax.styles[name].image = "6";
+					break;
+				case "STYLE_IDENTIFIER" : 
+					syntax.styles[name].clr = "Keyword2";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					syntax.styles[name].image = "12";
+					break;
+				case "STYLE_ATTRIBUTE" : 
+					syntax.styles[name].clr = "Keyword3";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					break;
+				case "STYLE_TAG" :
+				case "STYLE_ELEMENT" : 
+					syntax.styles[name].clr = "Tag";
+					syntax.styles[name].bkclr = "#FFFFFFFF";
+					break;
+			}
+		}
+	}
+	if (operators.length) syntax.operators = uniq(operators).join("");
+	else syntax.operators = "()[]{}+-*/%=<>"; // default operators
+
+	generateHESyntax(syntax);
+}
+
+function TPOption(text, name, def) {
+	var found = text.match(RegExp("^" + name + "\\s*=[ \t]*(.*?)?$", "m"));
+	return (found && found[1] != "")? found[1] : def;
+}
+
+function IniOption(data, section, name, def) {
+	if (!def) def = "";
+	var sect = data[section];
+	return (sect && sect[name] && sect[name] != "")? sect[name] : def;
+}
+
+function importTPSyntax(filename) {
+	var data = parseINI(read_file(filename));
+	var syntax = {};	
+	syntax.name = filename.replace(/.*\\|\..*$/g, '');
+	syntax.case_sensitive = IniOption(data, "Syntax", "IgnoreCase", "No").toLowerCase() == "no";
+	syntax.words = IniOption(data, "Syntax", "KeyWordChars", "");
+	syntax.words_init = IniOption(data, "Syntax", "InitKeyWordChars", "");
+	syntax.open_close = uniq(IniOption(data, "Syntax", "BracketChars", "").split("")).sort().join("");
+	syntax.operators = uniq(IniOption(data, "Syntax", "OperatorChars", "").split("")).join("");
+	var string_esc = IniOption(data, "Syntax", "StringEsc", "");  
+	var char_esc = IniOption(data, "Syntax", "CharEsc", "");  
+	syntax.escape_char = (string_esc == "")?char_esc:string_esc;
+	syntax.hex_prefix = IniOption(data, "Syntax", "HexPrefix", "0x");
+	
+	var line_comment        = { open: IniOption(data, "Syntax", "SingleComment", ""), close: "\\n" };
+	var column = IniOption(data, "Syntax", "SingleCommentCol", "0");
+	if (column == "Leading") line_comment.first_pos = "true";
+ 	else if (column != "0") line_comment.start_pos = parseInt(column) - 1;
+
+	var line_comment_alt    = { open: IniOption(data, "Syntax", "SingleCommentAlt", ""), close: "\\n" };
+	var column_alt = IniOption(data, "Syntax", "SingleCommentColAlt", "0");
+	if (column_alt == "Leading") line_comment_alt.first_pos = "true";
+ 	else if (column_alt != "0") line_comment_alt.start_pos = parseInt(column_alt) - 1;
+
+	var block_comment       = { open: IniOption(data, "Syntax", "CommentStart", ""), close: IniOption(data, "Syntax", "CommentEnd", "") };
+	var block_comment_alt   = { open: IniOption(data, "Syntax", "CommentStartAlt", ""), close: IniOption(data, "Syntax", "CommentEndAlt", "") };
+	var string        		= { open: IniOption(data, "Syntax", "StringStart", ""), close: IniOption(data, "Syntax", "StringEnd", "") };
+	var string_alt     		= { open: IniOption(data, "Syntax", "StringAlt", ""), close: IniOption(data, "Syntax", "StringEnd", "") };
+	var chars        		= { open: IniOption(data, "Syntax", "CharStart", ""), close: IniOption(data, "Syntax", "CharEnd", "") };
+	var preprocessor        = { open: IniOption(data, "Syntax", "PreprocStart", ""), close: "\\n" };
+
+	if ( string_esc == "" && syntax.escape_char != "" ) {
+		string.escaping = "false";
+		string_alt.escaping = "false";
+	}
+	if ( char_esc == "" && syntax.escape_char != "" )   char_esc.escaping = "false"; 
+	
+	syntax.styles = {};
+
+	if (string.open != "" || string_alt.open != "") {
+		syntax.styles["Strings"] = { id: "string", name: "Strings", text: 1, bold: 0, italic: 0, underline: 0, clr: "Strings", bkclr: "#FFFFFFFF" };
+		syntax.styles["Strings"].blocks = [];
+		if ( string.open != "" ) syntax.styles["Strings"].blocks.push(string);
+		if ( string_alt.open != "" ) syntax.styles["Strings"].blocks.push(string_alt);
+	}
+
+	if (chars.open != "") {
+		syntax.styles["Char"] = { id: "char", name: "Char", text: 1, bold: 0, italic: 0, underline: 0, clr: "Strings", bkclr: "#FFFFFFFF" };
+		syntax.styles["Char"].blocks = [chars];
+	}
+
+	if (block_comment.open != "" || block_comment_alt.open != "" || line_comment.open != "" || line_comment_alt.open != "") {
+		syntax.styles["Comments"] = { id: "comment", name: "Comments", text: 1, bold: 0, italic: 1, underline: 0, clr: "Comments", bkclr: "#FFFFFFFF" };
+		syntax.styles["Comments"].blocks = [];
+		if ( line_comment.open != "" ) syntax.styles["Comments"].blocks.push(line_comment);
+		if ( line_comment_alt.open != "" ) syntax.styles["Comments"].blocks.push(line_comment_alt);
+		if ( block_comment.open != "" ) syntax.styles["Comments"].blocks.push(block_comment);
+		if ( block_comment_alt.open != "" ) syntax.styles["Comments"].blocks.push(block_comment_alt);
+	}
+
+	if (preprocessor.open != "") {
+		syntax.styles["Preprocessor"] = { id: "preprocessor", name: "Preprocessor", bold: 0, italic: 0, underline: 0, clr: "Preprocessor", bkclr: "#FFFFFFFF" };
+		syntax.styles["Preprocessor"].blocks = [preprocessor];
+	}
+	
+	for ( var section in data) {
+		if ( (typeof(data[section]) != 'object') )
+			continue;
+		if ( section == "Syntax" )
+			continue;
+		var keywords = [];
+		if ( section == "Preprocessor keywords" && preprocessor.open != "") {
+			var regexp = new RegExp("^[\\s\\" + preprocessor.open + "]+|\\s+$", "g");
+			for ( var val in data[section])
+				keywords.push(val.replace(regexp, ""));
+		} else {
+			for ( var val in data[section])
+				keywords.push(val.trim());			
+		}
+
+		keywords = uniq(keywords);
+		if ( keywords.length ) {
+			syntax.styles[section] = { name: section, keywords : keywords };
+			if ( section == "Preprocessor keywords" && preprocessor.open != "") {
+				syntax.styles[section].containers = { open : [{ id : "preprocessor" }] };
+			}
+		}
+	}
+
+	generateHESyntax(syntax);
+}
+
+function importPSPSyntax(filename) {
+	var data = parseINI(read_file(filename));
+	var syntax = {};	
+	syntax.name = IniOption(data, "Settings", "Name");
+	syntax.case_sensitive = IniOption(data, "Settings", "CaseSensitive", "0") == "1";
+	syntax.words = "0-9A-Za-z" + IniOption(data, "Settings", "KeyWordChars", "");
+	syntax.tab_size = IniOption(data, "Settings", "TabWidth", "0");
+	var indent_char = IniOption(data, "Settings", "IndentChar", "");
+	var unindent_char = IniOption(data, "Settings", "UnIndentChar", "");
+	if ( indent_char != "" && unindent_char != "" ) {
+		syntax.scopes = [{ open : indent_char, close : unindent_char }]
+	}
+	
+	var pspad_comments = {
+		// block comments
+		"ANSIComment":         [{ open : "/*", close : "*/"}],
+		"PasComment":          [{ open : "{", close : "}"}],
+		"HaskellComment":      [{ open : "{-", close : "-}"}],
+		"DComment":            [{ open : "/*", close : "+/"}],
+		"SmartComment":        [{ open : "{*", close : "*}"}],
+		"CComment":            [{ open : "/*", close : "*/"}],
+		"JCLComment":          [{ open : "//*", close : "*//"}],
+		"HTMLComment":         [{ open : "<!--", close : "-->"}],
+		"DollarMultiComment":  [{ open : "$", close : "$"}],
+		"DollarComment":       [{ open : "$(", close : "$)"}, { open : "$", close : "*"}],
+		"CLispComment":        [{ open : "#|", close : "|#"}],
+		"2Exclamation":        [{ open : "!!", close : "!!"}],
+		"DeadComment":         [{ open : "\"", close : "\""}],
+		"ForthComment":        [{ open : "( ", close : " )"}],
+		"LuaComment":          [{ open : "--[[", close : "]]"}],
+		"LilypondComment":     [{ open : "%(", close : "%)"}],
+		"OkumaComment":        [{ open : "(", close : ")"}],
+		"HellerComment":       [{ open : "(*", close : ")"}, { open : "(/", close : ")"}],
+		"PwShellComment":      [{ open : "<#", close : "#>"}],
+		"SSComment":           [{ open : "*", close : ";"}],
+                       		
+		// single comments
+		"SharpComment":        [{ open : "#", close : "\\n"}],
+		"ExclComment":         [{ open : "!", close : "\\n"}],
+		"PerCentComment":      [{ open : "%", close : "\\n"}],
+		"AutomatonComment":    [{ open : "%%", close : "\\n"}],
+		"SinglQComment":       [{ open : "'", close : "\\n"}],
+		"DblQComment":         [{ open : "\"", close : "\\n"}],
+		"ByComment":           [{ open : "@", close : "\\n"}],
+		"PipeComment":         [{ open : "|", close : "\\n"}],
+		"LBracketComment":     [{ open : "{", close : "\\n"}],
+		"BasComment":          [{ open : ";", close : "\\n"}],
+		"CPLComment":          [{ open : "$", close : "\\n"}],
+		"DMISComment":         [{ open : "$$", close : "\\n"}],
+		"FortranComment":      [{ open : "C", close : "\\n"}],
+		"CStarComment":        [{ open : "C*", close : "\\n"}],
+		"SQLComment":          [{ open : "--", close : "\\n"}],
+		"WebFocusComment":     [{ open : "-*", close : "\\n"}],
+		"FoxComment":          [{ open : "*", close : "\\n"}, { open : "&&", close : "\\n"}],
+		"PocoComment":         [{ open : "*;", close : "\\n"}],
+		"2StarsComment":       [{ open : "**", close : "\\n"}],
+		"PCLComment":          [{ open : "!*", close : "\\n"}],
+		"SpecComment":         [{ open : "/", close : "\\n"}],
+		"LineCComment":        [{ open : "/*", close : "\\n"}],
+		"SlashComment":        [{ open : "//", close : "\\n"}],
+		"JCLsingleComment":    [{ open : "//*", close : "\\n"}],
+		"REMComment":          [{ open : "REM", close : "\\n"}, { open : "::", close : "\\n"}],
+		"TabKeyComment":       [{ open : "\t", close : "\\n"}],
+		"SpaceComment":        [{ open : " ", close : "\\n"}],
+		"DashComment":         [{ open : "-", close : "\\n"}],
+		"BackSlashComment":    [{ open : "\\", close : "\\n"}],
+		"AngleBrackets":       [{ open : "<<<", close : "\\n"}],
+	}
+
+	var file_extensions = IniOption(data, "Settings", "FileType").trim();
+	syntax.file_extensions = file_extensions.split(/\s*,\s*/);
+	for (var i = 0; i < syntax.file_extensions.length; i++) {
+		syntax.file_extensions[i] = syntax.file_extensions[i].trim().toLowerCase();
+	}
+	
+	syntax.styles = {};
+	
+	// collect comments
+	var comment_blocks = [];
+	for ( var val in data["Settings"]) {
+		if ( pspad_comments[val] ) {
+			comment_blocks.push.apply(comment_blocks, pspad_comments[val]);
+		}
+	}
+
+	if ( comment_blocks.length ) {
+		syntax.styles["Comments"] = { id: "comment", name: "Comments", text: 1, bold: 0, italic: 1, underline: 0, clr: "Comments", bkclr: "#FFFFFFFF", blocks : comment_blocks };
+	}
+	
+	// collect strings
+	var string_blocks = [];
+	if (IniOption(data, "Settings", "SingleQuote", "0") == "1" ) {
+		string_blocks.push({open : "'", close : "'"});
+	}
+	if (IniOption(data, "Settings", "DoubleQuote", "0") == "1" ) {
+		string_blocks.push({open : "\"", close : "\""});
+	}
+
+	if ( string_blocks.length ) {
+		syntax.styles["Strings"] = { id: "string", name: "Strings", text: 1, bold: 0, italic: 0, underline: 0, clr: "Strings", bkclr: "#FFFFFFFF", blocks : string_blocks };
+	}
+
+	for ( var section in data) {
+		if ( (typeof(data[section]) != 'object') )
+			continue;
+		if ( section == "Settings" )
+			continue;
+		var keywords = [];
+		for ( var val in data[section])
+			keywords.push(val.trim());			
+
+		keywords = uniq(keywords);
+		if ( keywords.length ) {
+			syntax.styles[section] = { name: section, keywords : keywords };
+		}
+	}
+
+	generateHESyntax(syntax);	
+}
+
+var vImportUE = new Command("SyntaxTools.ImportUESyntax", "Import UltraEdit Syntax...", "Import UltraEdit syntax definition from *.uew file", - 1);
+vImportUE.onExecute = function() {
+	var files = ax2js(SelectFiles(true, "*.uew", "", 0, "UltraEdit Syntax Definition (*.uew)|*.uew|All Files (*.*)||"));
+	for (var i = 0; i < files.length; i++)
+		importUESyntax(files[i]);
+}
+
+var vImportTextPad = new Command("SyntaxTools.ImportTPSyntax", "Import TextPad Syntax...", "Import TextPad syntax definition from *.syn file", - 1);
+vImportTextPad.onExecute = function() {
+	var files = ax2js(SelectFiles(true, "*.syn", "", 0, "TextPad Syntax Definition (*.syn)|*.syn|All Files (*.*)||"));
+	for (var i = 0; i < files.length; i++)
+		importTPSyntax(files[i]);
+}
+
+var vImportPSPad = new Command("SyntaxTools.ImportPSPSyntax", "Import PSPad Syntax...", "Import PSPad syntax definition from *.ini file", - 1);
+vImportPSPad.onExecute = function() {
+	var files = ax2js(SelectFiles(true, "*.ini", "", 0, "PSPad Syntax Definition (*.ini)|*.ini|All Files (*.*)||"));
+	for (var i = 0; i < files.length; i++)
+		importPSPSyntax(files[i]);
+}
+
+var vLoadSyntax = new Command("SyntaxTools.LoadSyntax", "Load Syntax...", "(Re)Load syntax from syntax specification file", - 1);
+vLoadSyntax.onExecute = function() {
+	if ( ActiveDocument != null && ActiveDocument.Syntax.ID == 'hippo' && ActiveDocument.Path != "") {
+		Settings.LoadSyntax(ActiveDocument.Path);
+	} else {
+		var files = ax2js(SelectFiles(true, "*_spec.xml"));
+		for (var i = 0; i < files.length; i++)
+			Settings.LoadSyntax(files[i]);		
+	}
+}
+
+////////////////////////////////////////////////////////////////////////
+// Update main menu with our items
+Application.onInitMainMenu = function(bUpdate) {
+	if (bUpdate === false) {
+		var vMenu = this.InsertSubMenu(this.ItemCount - 2, "Syntax");
+		if (vMenu != null) {
+			vMenu.AddItem("", vImportUE);
+			vMenu.AddItem("", vImportTextPad);
+			vMenu.AddItem("", vImportPSPad);
+			vMenu.AddItem("");
+			vMenu.AddItem("", vLoadSyntax);
+		}
+	}
+}
